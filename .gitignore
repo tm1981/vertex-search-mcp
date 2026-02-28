@@ -1,0 +1,9 @@
+node_modules/
+dist/
+gac/
+.env
+
+# Application Logs
+logs/
+.*-audit.json
+*.log
