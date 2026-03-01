@@ -14,17 +14,24 @@ if (!config.projectId) {
   process.exit(1);
 }
 
-const server = new McpServer({
-  name: "vertex-search",
-  version: "1.0.0",
-});
+// Factory function to create a fresh McpServer instance per connection
+function getServer() {
+  const server = new McpServer({
+    name: "vertex-search",
+    version: "1.0.0",
+  });
 
-// Register tools
-registerSearchTool(server);
+  // Register tools
+  registerSearchTool(server);
+  return server;
+}
+
+// Global server for stdio mode that requires it as a singleton
+let stdioServer: McpServer | null = null;
 
 async function main() {
   if (config.port) {
-    // HTTP mode: stateless Streamable HTTP transport on a single /mcp endpoint
+    // HTTP mode: Streamable HTTP transport
     // Use host 0.0.0.0 to disable localhost DNS rebinding protection (fixes 403 on remote servers)
     const app = createMcpExpressApp({ host: "0.0.0.0" });
 
@@ -56,8 +63,10 @@ async function main() {
             }
           };
 
-          // Crucial: Only connect to the McpServer once per session initialization
-          await server.connect(transport);
+          // Crucial fix: The MCP protocol requires ONE server instance per transport.
+          // We must spin up a fresh server closure for this specific HTTP client session.
+          const sessionServer = getServer();
+          await sessionServer.connect(transport);
         } else {
           // 3. Invalid Request
           res.status(400).json({
@@ -94,7 +103,8 @@ async function main() {
   } else {
     // stdio mode: single transport managed by the AI client
     const transport = new StdioServerTransport();
-    await server.connect(transport);
+    stdioServer = getServer();
+    await stdioServer.connect(transport);
     console.error("vertex-search MCP server running on stdio");
     logger.info("Vertex Search MCP server started on stdio");
   }
@@ -103,7 +113,9 @@ async function main() {
 // Graceful shutdown
 async function shutdown() {
   logger.info("Shutting down...");
-  await server.close();
+  if (stdioServer) {
+    await stdioServer.close();
+  }
   process.exit(0);
 }
 
