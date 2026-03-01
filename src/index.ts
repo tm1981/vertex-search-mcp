@@ -1,5 +1,4 @@
-#!/usr/bin/env node
-
+import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -29,14 +28,47 @@ async function main() {
     // Use host 0.0.0.0 to disable localhost DNS rebinding protection (fixes 403 on remote servers)
     const app = createMcpExpressApp({ host: "0.0.0.0" });
 
-    app.all("/mcp", async (req, res) => {
-      // In stateless mode, we just pass undefined to generate a new session per request
-      const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: undefined,
-      });
+    // Store active sessions mapping sessionId to transport
+    const transports = new Map<string, StreamableHTTPServerTransport>();
 
+    app.all("/mcp", async (req, res) => {
       try {
-        await server.connect(transport);
+        const sessionId = req.headers["mcp-session-id"] as string | undefined;
+        let transport: StreamableHTTPServerTransport;
+
+        if (sessionId && transports.has(sessionId)) {
+          // 1. Existing Session (GET, POST, DELETE)
+          transport = transports.get(sessionId)!;
+        } else if (!sessionId && req.method === "POST") {
+          // 2. New Session Initialization (POST without session ID)
+          transport = new StreamableHTTPServerTransport({
+            sessionIdGenerator: () => randomUUID(),
+            onsessioninitialized: (sid) => {
+              logger.info(`StreamableHTTP session initialized with ID: \${sid}`);
+              transports.set(sid, transport);
+            }
+          });
+
+          transport.onclose = () => {
+            if (transport.sessionId) {
+              logger.info(`Transport closed for session \${transport.sessionId}`);
+              transports.delete(transport.sessionId);
+            }
+          };
+
+          // Crucial: Only connect to the McpServer once per session initialization
+          await server.connect(transport);
+        } else {
+          // 3. Invalid Request
+          res.status(400).json({
+            jsonrpc: "2.0",
+            error: { code: -32000, message: "Invalid session ID or request missing initialization parameters" },
+            id: null
+          });
+          return;
+        }
+
+        // Delegate handling of this specific HTTP request to the transport layer
         await transport.handleRequest(req, res, req.body);
       } catch (error) {
         logger.error("Error handling MCP request:", error);
@@ -47,9 +79,6 @@ async function main() {
             id: null,
           });
         }
-      } finally {
-        // Clean up transport immediately after handling the request
-        await transport.close();
       }
     });
 
