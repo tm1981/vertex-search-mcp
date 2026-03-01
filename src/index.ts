@@ -1,7 +1,7 @@
-import { randomUUID } from "node:crypto";
+#!/usr/bin/env node
+
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 
@@ -25,49 +25,21 @@ registerSearchTool(server);
 
 async function main() {
   if (config.port) {
-    // HTTP mode: SSE transport for standard MCP clients
+    // HTTP mode: stateless Streamable HTTP transport on a single /mcp endpoint
     // Use host 0.0.0.0 to disable localhost DNS rebinding protection (fixes 403 on remote servers)
     const app = createMcpExpressApp({ host: "0.0.0.0" });
 
-    // Store active SSE connections
-    const transports = new Map<string, any>();
-
-    app.get("/sse", async (req, res) => {
-      logger.info("New SSE connection established");
-
-      // Use standard SSEServerTransport supporting /message endpoint for incoming POSTs
-      const transport = new SSEServerTransport("/message", res);
-      transports.set(transport.sessionId, transport);
-
-      res.on("close", () => {
-        logger.info(`SSE connection closed for session: ${transport.sessionId}`);
-        transports.delete(transport.sessionId);
+    app.all("/mcp", async (req, res) => {
+      // In stateless mode, we just pass undefined to generate a new session per request
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: undefined,
       });
 
       try {
         await server.connect(transport);
+        await transport.handleRequest(req, res, req.body);
       } catch (error) {
-        logger.error("Error connecting server to transport:", error);
-      }
-    });
-
-    app.post("/message", async (req, res) => {
-      const sessionId = req.query.sessionId as string;
-      const transport = transports.get(sessionId);
-
-      if (!transport) {
-        res.status(404).json({
-          jsonrpc: "2.0",
-          error: { code: -32000, message: "Session not found" },
-          id: null,
-        });
-        return;
-      }
-
-      try {
-        await transport.handlePostMessage(req, res, req.body);
-      } catch (error) {
-        logger.error(`Error handling message for session ${sessionId}:`, error);
+        logger.error("Error handling MCP request:", error);
         if (!res.headersSent) {
           res.status(500).json({
             jsonrpc: "2.0",
@@ -75,6 +47,9 @@ async function main() {
             id: null,
           });
         }
+      } finally {
+        // Clean up transport immediately after handling the request
+        await transport.close();
       }
     });
 
