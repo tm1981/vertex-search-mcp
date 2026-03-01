@@ -6,7 +6,7 @@ Validating the stateless Streamable HTTP transport pattern and per-request chat 
 ## Recent Changes
 *   **Dual Deployment Architecture**: The MCP supports two distinct modes dictated by `.env`:
     1.  **Standard I/O**: Runs as a CLI script managed by the AI Client (when `PORT` is omitted).
-    2.  **Streamable HTTP**: Runs as a standalone background service via a single `POST /mcp` endpoint using `createMcpExpressApp` and `StreamableHTTPServerTransport` in stateless mode (when `PORT` is defined).
+    2.  **Streamable HTTP**: Runs as a standalone background service via a single `/mcp` endpoint using `createMcpExpressApp` (bounded to `0.0.0.0`) and `StreamableHTTPServerTransport` in stateful mode with session ID routing (when `PORT` is defined).
 *   **Per-Request Chat Isolation**: Each `vertex_search` call creates a fresh Gemini chat session, preventing conversation history from leaking across unrelated queries.
 *   **Real-time Logging**: Added `winston.transports.Console` routed to `stderr` to allow users to view live server logs without breaking the MCP STDOUT/STDIN communication protocol.
 *   **Rich MCP Errors**: Replaced generic text errors with standard `McpError` throws mapped to `ErrorCode.InvalidRequest` and `ErrorCode.InternalError` for better client parsing.

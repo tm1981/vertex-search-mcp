@@ -2,7 +2,7 @@
 
 ## Architecture
 This project follows a standard MCP server architecture:
-1.  **Transport Layer**: `StdioServerTransport` for CLI mode, or `StreamableHTTPServerTransport` (stateless, via `createMcpExpressApp`) for HTTP mode — communicates with MCP clients over standard I/O or a single `POST /mcp` endpoint.
+1.  **Transport Layer**: `StdioServerTransport` for CLI mode, or `StreamableHTTPServerTransport` (stateful session management, via `createMcpExpressApp` bounded to `0.0.0.0` to disable DNS rebinding protection) for HTTP mode — communicates with MCP clients over standard I/O or the `/mcp` endpoint using HTTP headers for session routing.
 2.  **Server Implementation**: `McpServer` - Defines the tools and handles incoming requests.
 3.  **Core Logic**: `vertex_search` tool - Integrated with Google Vertex AI SDK.
 4.  **External Service**: Google Vertex AI (Gemini Models) + Google Search Grounding.
@@ -39,7 +39,7 @@ The codebase is organized in the `src/` directory to separate concerns spanning 
 
 ### `src/index.ts`
 The main entry point for the MCP Server.
-*   `main()`: Asynchronous bootstrapper that determines the deployment mode based on `.env`. If `PORT` is defined, it creates an Express app via `createMcpExpressApp()` (with DNS rebinding protection) and mounts a stateless `StreamableHTTPServerTransport` on a single `POST /mcp` endpoint — each incoming request gets its own fresh transport instance. Otherwise, it instantiates a `StdioServerTransport` for standard command-line lifecycle managed usage. It also registers the single tool exposed by the MCP `vertex_search` and connects the requested transport mode to the initialized `McpServer`.
+*   `main()`: Asynchronous bootstrapper that determines the deployment mode based on `.env`. If `PORT` is defined, it creates an Express app via `createMcpExpressApp()` (explicitly bounded to `0.0.0.0` to bypass default localhost DNS rebinding protection) and manages a mapping of stateful `StreamableHTTPServerTransport` logic on the `/mcp` endpoint multiplexed via the `mcp-session-id` request header. Otherwise, it instantiates a `StdioServerTransport` for standard command-line lifecycle managed usage. It also registers the single tool exposed by the MCP `vertex_search` and connects the requested transport mode to the initialized `McpServer`.
 
 ### `src/config/env.ts`
 Centralized environment loader and validator.
